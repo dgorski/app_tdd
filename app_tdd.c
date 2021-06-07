@@ -321,8 +321,8 @@ void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 	if (stasis_message) {
 		stasis_publish(ast_channel_topic(chan), stasis_message);
 	} else {
-    ast_log(AST_LOG_WARNING, "TddRx not publishing stasis message for %s (null)\n", ti->name);
-  }
+		ast_log(AST_LOG_WARNING, "TddRx not publishing stasis message for %s (null)\n", ti->name);
+	}
 
 	chan = ast_channel_unref(chan);
 }
@@ -446,7 +446,7 @@ static int manager_tddtx(struct mansession *s, const struct message *m)
 
 	ast_channel_lock(c);
 
-  /* tx really only works when audiohook is getting write frames (like from a bridge) */
+	/* tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
   if(ast_channel_is_bridged(chan) == 0) {
 		ast_channel_unlock(c);
@@ -534,7 +534,7 @@ static char *handle_cli_tdd(struct ast_cli_entry *e, int cmd, struct ast_cli_arg
 	}
 
 	ast_channel_lock(chan);
-  /* tx really only works when audiohook is getting write frames (like from a bridge) */
+	/* tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
   if(ast_channel_is_bridged(chan) == 0) {
 		ast_channel_unlock(c);
