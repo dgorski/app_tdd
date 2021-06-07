@@ -16,6 +16,8 @@ Things that work so far:
 
 Things that still need work:
 
+- received messages should be encoded with quoted-printable or base64 as they may contain control sequences (\r \n \0 etc)
+- the send AMI and CLI commands should also use some sort of encoding in order to send supported baudot specials
 - The CLI hangs sometimes, almost certainly because of something I'm doing incorrectly
 - Stasis messages posted to the channel topic DO NOT WORK, however I'm still figuring out stasis so again, probablyjust  something I'm doing wrong
 
