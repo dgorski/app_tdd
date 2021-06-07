@@ -83,7 +83,16 @@ detected the received message will be posted via a manager/stasis event for this
 
  ***/
 
-STASIS_MESSAGE_TYPE_DEFN_LOCAL(tdd_rx_msg_type);
+static struct ast_json *tdd_rx_msg_to_json(
+	struct stasis_message *message,
+	const struct stasis_message_sanitizer *sanitize)
+{
+	return channel_blob_to_json(message, "TddRxMsg", sanitize);
+}
+
+STASIS_MESSAGE_TYPE_DEFN_LOCAL(tdd_rx_msg_type,
+  .to_json = tdd_rx_msg_to_json,
+);
 
 /*! \brief keep track of modem and audiohook state
  */
