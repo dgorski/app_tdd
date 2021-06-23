@@ -44,10 +44,8 @@
 		</synopsis>
 		<syntax />
 		<description>
-			<para>The TddRx application is used to begin listening for TDD tones from the channel.  If TDD tones are
-detected the received message will be posted via a manager/stasis event for this channel.</para>
-			<para>This application will exit immediately after setting up its audiohook.</para>
-			<note><para></para></note>
+			<para>The TddRx application is used to begin listening for TDD tones from the channel.  If TDD tones are detected, the received message will be posted via manager/stasis events for this channel.</para>
+			<para>This application will exit immediately after setting up an audiohook.</para>
 		</description>
 		<see-also>
 			<ref type="function">AUDIOHOOK_INHERIT</ref>
@@ -79,6 +77,16 @@ detected the received message will be posted via a manager/stasis event for this
 					<para>The TDD message received.</para>
 				</parameter>
 			</syntax>
+		</managerEventInstance>
+	</managerEvent>
+	<managerEvent language="en_US" name="TddStart">
+		<managerEventInstance class="EVENT_FLAG_CALL">
+			<synopsis>Raised when TDD processing is added to a channel.</synopsis>
+		</managerEventInstance>
+	</managerEvent>
+	<managerEvent language="en_US" name="TddStop">
+		<managerEventInstance class="EVENT_FLAG_CALL">
+			<synopsis>Raised when TDD processing is removed from a channel.</synopsis>
 		</managerEventInstance>
 	</managerEvent>
 
@@ -135,9 +143,17 @@ static struct ast_json *channel_blob_to_json(
 	return to_json;
 }
 
-/*! \brief stasis message to_json for tdd_rx_msg event
- *
- */
+static struct ast_json *tdd_start_to_json(
+	struct stasis_message *message,
+	const struct stasis_message_sanitizer *sanitize)
+{
+	return channel_blob_to_json(message, "TddStart", sanitize);
+}
+
+STASIS_MESSAGE_TYPE_DEFN_LOCAL(tdd_start_type,
+	.to_json = tdd_start_to_json,
+);
+
 static struct ast_json *tdd_rx_msg_to_json(
 	struct stasis_message *message,
 	const struct stasis_message_sanitizer *sanitize)
@@ -146,7 +162,18 @@ static struct ast_json *tdd_rx_msg_to_json(
 }
 
 STASIS_MESSAGE_TYPE_DEFN_LOCAL(tdd_rx_msg_type,
-  .to_json = tdd_rx_msg_to_json,
+	.to_json = tdd_rx_msg_to_json,
+);
+
+static struct ast_json *tdd_stop_to_json(
+	struct stasis_message *message,
+	const struct stasis_message_sanitizer *sanitize)
+{
+	return channel_blob_to_json(message, "TddStop", sanitize);
+}
+
+STASIS_MESSAGE_TYPE_DEFN_LOCAL(tdd_stop_type,
+	.to_json = tdd_stop_to_json,
 );
 
 /*! \brief keep track of modem and audiohook state
@@ -250,13 +277,26 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 
 	span_log(&s->logging, SPAN_LOG_FLOW, "Rx byte %x; rs_msg_len=%d\n", byte, s->rx_msg_len);
 	if ((octet = v18_decode_baudot(s, byte))) {
-		s->rx_msg[s->rx_msg_len++] = octet;
 		span_log(&s->logging, SPAN_LOG_FLOW, "baudot returned 0x%x (%c)", octet, octet);
+		if (octet == 0x08) {
+		span_log(&s->logging, SPAN_LOG_FLOW, "filtering null/del (0x08)");
+		} else if (octet == 0x0a) {
+			s->rx_msg[s->rx_msg_len++] = '\\';
+			s->rx_msg[s->rx_msg_len++] = 'n';
+		} else if (octet == 0x0d) {
+			s->rx_msg[s->rx_msg_len++] = '\\';
+			s->rx_msg[s->rx_msg_len++] = 'r';
+		} else if (octet == '"') {
+			s->rx_msg[s->rx_msg_len++] = '\\';
+			s->rx_msg[s->rx_msg_len++] = '"';
+		} else {
+			s->rx_msg[s->rx_msg_len++] = octet;
+		}
 	} else {
 		span_log(&s->logging, SPAN_LOG_FLOW, "baudot returned zero");
 	}
 
-	if (s->rx_msg_len >= 32) /* was 256 */
+	if (s->rx_msg_len >= 256)
 	{
 		s->rx_msg[s->rx_msg_len] = '\0';
 		span_log(&s->logging, SPAN_LOG_FLOW, "[bufsiz] calling put_msg with %d chars", s->rx_msg_len);
@@ -268,11 +308,41 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 /*! \brief datastore destructor
  *
  * Called when a channel is destroyed to clean up the datastore. Also cleans up the audiohook.
+ *
+ * TODO: this is too late in channel lifecycle to send TddStop events as the channel is already
+ * gone, need to figure out how to hook channel destruction sooner in the destroy phase
  */
 static void destroy_callback(void *data)
 {
 	struct tdd_info *ti = data;
+	struct ast_channel *chan;
+
+	RAII_VAR(struct stasis_message *, stasis_message, NULL, ao2_cleanup);
+	RAII_VAR(struct ast_json *, stasis_message_blob, NULL, ast_json_unref);
+
 	ast_log(AST_LOG_VERBOSE, "TddRx datastore destroy callback\n");
+
+	chan = ast_channel_get_by_name(ti->name);
+
+	if(chan) {
+		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStop", "Channel: %s\r\n", ti->name);
+
+		stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "inactive");
+
+		ast_channel_lock(chan);
+
+		stasis_message = ast_channel_blob_create_from_cache(ast_channel_uniqueid(chan),
+			tdd_stop_type(), stasis_message_blob);
+
+		if (stasis_message) {
+			stasis_publish(ast_channel_topic(chan), stasis_message);
+		} else {
+			ast_log(AST_LOG_WARNING, "TddRx not publishing TddStop stasis message for %s (null)\n", ti->name);
+		}
+
+		ast_channel_unlock(chan);
+		ast_channel_unref(chan);
+	}
 
 	/* destroy the audiohook */
 	ast_audiohook_lock(&ti->audiohook);
@@ -284,7 +354,7 @@ static void destroy_callback(void *data)
 	ast_mutex_destroy(&ti->v18_tx_lock);
 	ast_free(ti->name);
 
-	ast_log(AST_LOG_VERBOSE, "TddRx modem { trans=%ld, sent=%ld, recv=%ld }\n", ti->carrier_trans, ti->chars_sent, ti->chars_recv);
+	ast_debug(1, "TddRx modem { trans=%ld, sent=%ld, recv=%ld }\n", ti->carrier_trans, ti->chars_sent, ti->chars_recv);
 
 	ast_free(ti);
 
@@ -302,8 +372,7 @@ static const struct ast_datastore_info tdd_datastore = {
  *
  * \note see ast_audiohook_manipulate_callback in audiohook.h
  */
-int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *chan, struct ast_frame *frame, enum ast_audiohook_direction direction);
-int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *chan, struct ast_frame *frame, enum ast_audiohook_direction direction)
+static int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *chan, struct ast_frame *frame, enum ast_audiohook_direction direction)
 {
 	struct ast_datastore *datastore = NULL;
 	struct tdd_info *ti = NULL;
@@ -338,11 +407,11 @@ int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *chan, str
 		}
 	} else { /* AST_AUDIOHOOK_DIRECTION_WRITE */
 		for (cur = frame; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
-			/* blindly write over frame samples with modem samples, if any */
-	ast_mutex_lock(&ti->v18_tx_lock);
+			/* overwrite frame samples with modem samples, if any */
+			ast_mutex_lock(&ti->v18_tx_lock);
 			if(v18_tx(&ti->v18_state, cur->data.ptr, cur->samples) > 0)
 				ret = 0; /* changed at least one sample */
-      ast_mutex_unlock(&ti->v18_tx_lock);
+			ast_mutex_unlock(&ti->v18_tx_lock);
 		}
 	}
 
@@ -356,8 +425,7 @@ int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *chan, str
  *
  * \note This is a spandsp callback function
  */
-void tdd_put_msg(void *user_data, const uint8_t *msg, int len);
-void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
+static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 {
 	struct tdd_info *ti = user_data;
 	struct ast_channel *chan;
@@ -376,11 +444,11 @@ void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 	}
 
 	ast_manager_event(chan, EVENT_FLAG_CALL, "TddRxMsg",
-		"Channel: %s\r\nMessage: %s\r\n", ast_channel_name(chan), msg);
+		"Channel: %s\r\nMessage: %s\r\n", ti->name, msg);
 
 	stasis_message_blob = ast_json_pack("{s: s}", "message", msg);
 
-  ast_channel_lock(chan);
+	ast_channel_lock(chan);
 
 	stasis_message = ast_channel_blob_create_from_cache(ast_channel_uniqueid(chan),
 		tdd_rx_msg_type(), stasis_message_blob);
@@ -388,11 +456,11 @@ void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 	if (stasis_message) {
 		stasis_publish(ast_channel_topic(chan), stasis_message);
 	} else {
-    ast_log(AST_LOG_WARNING, "TddRx not publishing stasis message for %s (null)\n", ti->name);
-  }
+		ast_log(AST_LOG_WARNING, "TddRx not publishing stasis message for %s (null)\n", ti->name);
+	}
 
-  ast_channel_unlock(chan);
-  ast_channel_unref(chan);
+	ast_channel_unlock(chan);
+	ast_channel_unref(chan);
 }
 
 /*! \brief called by the FSK modem when the modem status changes
@@ -402,8 +470,7 @@ void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
  *
  * \note This is a spandsp callback function
  */
-void modem_rx_status(void *user_data, int status);
-void modem_rx_status(void *user_data, int status)
+static void modem_rx_status(void *user_data, int status)
 {
 	struct tdd_info *ti = user_data;
 	ti->rx_status = status;
@@ -424,6 +491,9 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 {
 	struct ast_datastore *datastore = NULL;
 	struct tdd_info *ti = NULL;
+
+	RAII_VAR(struct stasis_message *, stasis_message, NULL, ao2_cleanup);
+	RAII_VAR(struct ast_json *, stasis_message_blob, NULL, ast_json_unref);
 
 	ast_debug(1, "TddRx exec\n");
 
@@ -463,7 +533,7 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	v18_state_t *vs = &ti->v18_state;
 	fsk_rx_state_t *fs = &vs->fskrx;
 	fsk_rx_set_modem_status_handler(fs, modem_rx_status, ti); /* override */
-	fsk_rx_set_put_bit(fs, my_v18_tdd_put_async_byte, ti); /* override */
+	fsk_rx_set_put_bit(fs, my_v18_tdd_put_async_byte, ti);    /* override */
 
 	ast_audiohook_init(&ti->audiohook, AST_AUDIOHOOK_TYPE_MANIPULATE, "TDD", 0);
 	ti->audiohook.manipulate_callback = hook_callback;
@@ -477,6 +547,22 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	ast_channel_datastore_add(chan, datastore);
 	ast_channel_unlock(chan);
 	ast_audiohook_attach(chan, &ti->audiohook);
+
+	ast_manager_event(chan, EVENT_FLAG_CALL, "TddStart", "Channel: %s\r\n", ti->name);
+
+	stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "active");
+
+	ast_channel_lock(chan);
+
+	stasis_message = ast_channel_blob_create_from_cache(ast_channel_uniqueid(chan),
+		tdd_start_type(), stasis_message_blob);
+
+	if (stasis_message) {
+		stasis_publish(ast_channel_topic(chan), stasis_message);
+	} else {
+		ast_log(AST_LOG_WARNING, "TddRx not publishing TddStart stasis message for %s (null)\n", ti->name);
+	}
+	ast_channel_unlock(chan);
 
 	return 0;
 }
@@ -511,14 +597,14 @@ static int manager_tddtx(struct mansession *s, const struct message *m)
 
 	ast_channel_lock(c);
 
-  /* tx really only works when audiohook is getting write frames (like from a bridge) */
+	/* tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
-  if(ast_channel_is_bridged(chan) == 0) {
+	if(ast_channel_is_bridged(chan) == 0) {
 		ast_channel_unlock(c);
 		ast_channel_unref(c);
 		astman_send_error(s, m, "Channel is not bridged");
-    return AMI_SUCCESS;
-  }
+		return AMI_SUCCESS;
+	}
 */
 	if (!(datastore = ast_channel_datastore_find(c, &tdd_datastore, NULL))) {
 		ast_channel_unlock(c);
@@ -533,6 +619,7 @@ static int manager_tddtx(struct mansession *s, const struct message *m)
 	ti = datastore->data;
 
 	ast_mutex_lock(&ti->v18_tx_lock);
+	/* TODO: decode \ escapes first, like \r \n \" etc */
 	v18_put(&ti->v18_state, message, strlen(message));
 	ast_mutex_unlock(&ti->v18_tx_lock);
 
@@ -591,7 +678,6 @@ static char *handle_cli_tdd(struct ast_cli_entry *e, int cmd, struct ast_cli_arg
 		return CLI_SHOWUSAGE;
 	}
 
-	/* struct ast_channel *ast_channel_get_by_name_prefix(const char *name, size_t name_len); */
 	chan =  ast_channel_get_by_name(a->argv[2]);
 	if(!chan) {
 		ast_cli(a->fd, "No channel matching '%s' found.\n", a->argv[2]);
@@ -599,14 +685,14 @@ static char *handle_cli_tdd(struct ast_cli_entry *e, int cmd, struct ast_cli_arg
 	}
 
 	ast_channel_lock(chan);
-  /* tx really only works when audiohook is getting write frames (like from a bridge) */
+	/* tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
-  if(ast_channel_is_bridged(chan) == 0) {
+	if(ast_channel_is_bridged(chan) == 0) {
 		ast_channel_unlock(c);
 		ast_channel_unref(c);
 		ast_cli(a->fd, "Channel is not bridged");
 		return CLI_SUCCESS;
-  }
+	}
 */
 
 	if (!(datastore = ast_channel_datastore_find(chan, &tdd_datastore, NULL))) {
@@ -644,10 +730,12 @@ static char *app = "TddRx";
 static int unload_module(void) {
 	int res;
 
+	STASIS_MESSAGE_TYPE_CLEANUP(tdd_start_type);
 	STASIS_MESSAGE_TYPE_CLEANUP(tdd_rx_msg_type);
+	STASIS_MESSAGE_TYPE_CLEANUP(tdd_stop_type);
 	ast_cli_unregister_multiple(cli_tdd, ARRAY_LEN(cli_tdd));
 	res = ast_unregister_application(app);
-	res |= ast_manager_register_xml("TddTx", EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL, manager_tddtx);
+	res |= ast_manager_unregister("TddTx");
 
 	return res;
 }
@@ -655,7 +743,9 @@ static int unload_module(void) {
 static int load_module(void) {
 	int res;
 
+	STASIS_MESSAGE_TYPE_INIT(tdd_start_type);
 	STASIS_MESSAGE_TYPE_INIT(tdd_rx_msg_type);
+	STASIS_MESSAGE_TYPE_INIT(tdd_stop_type);
 	ast_cli_register_multiple(cli_tdd, ARRAY_LEN(cli_tdd));
 	res = ast_register_application_xml(app, tdd_rx_exec);
 	res |= ast_manager_register_xml("TddTx", EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL, manager_tddtx);
