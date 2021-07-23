@@ -11,7 +11,7 @@ Things that work so far:
 - the receiver does receive TDD (FSK @ 45.45 baud)
 - the transmitter does transmit TDD
 - both have been tested with real TDD TTY hardware (Ultratec 1140)
-- both have been tested with real iPhone RTT
+- both have been tested with real iPhone RTT (via PSTN)
 - AMI events are raised when a TDD message is received
 - AMI requests to send TDD on a channel function properly
 - CLI requests to send TDD on a channel function properly
