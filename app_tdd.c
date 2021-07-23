@@ -1,6 +1,6 @@
 /*! \file
  *
- * \brief TDD() - Technology independent in-line TDD support
+ * \brief TddRx() - Technology independent in-line TDD support
  *
  * \ingroup applications
  *
@@ -51,6 +51,22 @@
 			<ref type="function">AUDIOHOOK_INHERIT</ref>
 		</see-also>
 	</application>
+	<application name="TddTx" language="en_US">
+		<synopsis>
+			Send <replaceable>message</replaceable> using TDD tones on the current channel.
+		</synopsis>
+		<syntax>
+			<parameter name="message" required="true" />
+		</syntax>
+		<description>
+			<para>Sends TDD tones to the channel in the same way as the TddTx manager action.</para>
+			<para>If TDD processing is not enabled via TddRx, will return an error.</para>
+		</description>
+		<see-also>
+			<ref type="application">TddRx</ref>
+			<ref type="manager">TddTx</ref>
+		</see-also>
+	</application>
 	<manager name="TddTx" language="en_US">
 		<synopsis>
 			Send a TDD message on a channel.
@@ -61,12 +77,16 @@
 				<para>The name of the channel to send on.</para>
 			</parameter>
 			<parameter name="Message" required="true">
-				<para>The message to be sent.  Note that TDD uses BAUDOT code which limits the available characters that can be sent. Invalid characters are silently ignored.</para>
+				<para>The message to be sent.</para>
+				<para><note>NOTE:</note> TDD uses BAUDOT code which limits the characters that can be sent. Invalid characters are silently ignored.</para>
 			</parameter>
 		</syntax>
 		<description>
-			<para>This action sends a message via TDD/TTY tones on the current channel.  If the channel is not currently processing TDD then an error will be returned.</para>
+			<para>This action sends a message via TDD/TTY tones on the current channel.  If TDD processing is not enabled on the channel an error will be returned.</para>
 		</description>
+		<see-also>
+			<ref type="link">https://en.wikipedia.org/wiki/Baudot_code#ITA_2_and_US-TTY</ref>
+		</see-also>
 	</manager>
 	<managerEvent language="en_US" name="TddRxMsg">
 		<managerEventInstance class="EVENT_FLAG_CALL">
@@ -119,8 +139,7 @@ static struct ast_json *channel_blob_to_json(
 	}
 
 	res |= ast_json_object_set(to_json, "type", ast_json_string_create(type));
-	res |= ast_json_object_set(to_json, "timestamp",
-		ast_json_timeval(*tv, NULL));
+	res |= ast_json_object_set(to_json, "timestamp", ast_json_timeval(*tv, NULL));
 
 	/* For global channel messages, the snapshot is optional */
 	if (snapshot) {
@@ -279,16 +298,9 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 	if ((octet = v18_decode_baudot(s, byte))) {
 		span_log(&s->logging, SPAN_LOG_FLOW, "baudot returned 0x%x (%c)", octet, octet);
 		if (octet == 0x08) {
-		span_log(&s->logging, SPAN_LOG_FLOW, "filtering null/del (0x08)");
-		} else if (octet == 0x0a) {
-			s->rx_msg[s->rx_msg_len++] = '\\';
-			s->rx_msg[s->rx_msg_len++] = 'n';
+			span_log(&s->logging, SPAN_LOG_FLOW, "filtering null/del (0x08)");
 		} else if (octet == 0x0d) {
-			s->rx_msg[s->rx_msg_len++] = '\\';
-			s->rx_msg[s->rx_msg_len++] = 'r';
-		} else if (octet == '"') {
-			s->rx_msg[s->rx_msg_len++] = '\\';
-			s->rx_msg[s->rx_msg_len++] = '"';
+			span_log(&s->logging, SPAN_LOG_FLOW, "filtering CR (0x0d)");
 		} else {
 			s->rx_msg[s->rx_msg_len++] = octet;
 		}
@@ -308,9 +320,6 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 /*! \brief datastore destructor
  *
  * Called when a channel is destroyed to clean up the datastore. Also cleans up the audiohook.
- *
- * TODO: this is too late in channel lifecycle to send TddStop events as the channel is already
- * gone, need to figure out how to hook channel destruction sooner in the destroy phase
  */
 static void destroy_callback(void *data)
 {
@@ -320,10 +329,16 @@ static void destroy_callback(void *data)
 	RAII_VAR(struct stasis_message *, stasis_message, NULL, ao2_cleanup);
 	RAII_VAR(struct ast_json *, stasis_message_blob, NULL, ast_json_unref);
 
-	ast_log(AST_LOG_VERBOSE, "TddRx datastore destroy callback\n");
+	ast_debug(1, "TddRx datastore destroy callback\n");
 
+	/* 
+	 * TODO: this is too late in channel lifecycle to send TddStop events as the channel
+	 * is already gone.  Need to figure out how to hook channel destruction sooner in the
+	 * destroy phase.
+	 *
+	 * Left here to support a StopTddRx command in the future.
+	 */
 	chan = ast_channel_get_by_name(ti->name);
-
 	if(chan) {
 		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStop", "Channel: %s\r\n", ti->name);
 
@@ -384,16 +399,21 @@ static int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *ch
 		return ret;
 	}
 
+	if (frame->frametype != AST_FRAME_VOICE) {
+		char ft[40] = "unknown";
+		char st[40] = "unknown";
+		ast_frame_type2str(frame->frametype, ft, sizeof(ft));
+		ast_frame_subclass2str(frame, st, sizeof(st), NULL, 0);
+		ast_debug(1, "TddRx frametype not VOICE (%s/%s)\n", ft, st);
+		return ret;
+	}
+
 	if (!(datastore = ast_channel_datastore_find(chan, &tdd_datastore, NULL))) {
 		ast_log(AST_LOG_ERROR, "TddRx audiohook cb didn't find datastore\n");
 		return ret;
 	}
 
 	ti = datastore->data;
-
-	if (frame->frametype != AST_FRAME_VOICE) {
-		return ret;
-	}
 
 	if(direction == AST_AUDIOHOOK_DIRECTION_READ) {
 		/* pass audio samples from the hook to the modem */
@@ -429,11 +449,13 @@ static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 {
 	struct tdd_info *ti = user_data;
 	struct ast_channel *chan;
+	char buf[513]; /* 2x modem buf +1 */
+	size_t i, o;
 
 	RAII_VAR(struct stasis_message *, stasis_message, NULL, ao2_cleanup);
 	RAII_VAR(struct ast_json *, stasis_message_blob, NULL, ast_json_unref);
 
-	ast_log(AST_LOG_VERBOSE, "TddRx got a TDD message '%s' for channel %s\n", msg, ti->name);
+	ast_debug(1, "TddRx got a TDD message '%s' for channel %s\n", msg, ti->name);
 
 	ti->chars_recv += len;
 
@@ -443,8 +465,19 @@ static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 		return;
 	}
 
+	/* escape \n for manager */
+	for(i=0, o=0; i < len; i++) {
+		if(msg[i] == '\n') {
+			buf[o++] = '\\';
+			buf[o++] = 'n';
+		} else {
+			buf[o++] = msg[i];
+		}
+	}
+	buf[o] = '\0';
+
 	ast_manager_event(chan, EVENT_FLAG_CALL, "TddRxMsg",
-		"Channel: %s\r\nMessage: %s\r\n", ti->name, msg);
+		"Channel: %s\r\nMessage: %s\r\n", ti->name, buf);
 
 	stasis_message_blob = ast_json_pack("{s: s}", "message", msg);
 
@@ -480,7 +513,7 @@ static void modem_rx_status(void *user_data, int status)
 	my_v18_tdd_put_async_byte(ti, status);
 }
 
-/*! \brief TddRxpp exec
+/*! \brief TddRx app exec
  *
  * \param chan the channel to add the audiohook on
  * \param data args passed to the application in the dialplan (currently not used)
@@ -567,8 +600,105 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	return 0;
 }
 
-/*! \brief Manager command TddTx exec
+/*! \brief adds a message to the V.18 modem tx queue
  *
+ * this is a common send method used by the manager "TddTx" and cli "tdd send" commands
+ *
+ * \param tdd_info the tdd data struct from the channel datastore
+ * \param message the string of chars to send to the remote
+ */
+static void tdd_send_message(struct tdd_info *ti, const char *message)
+{
+	char buf[256];
+	int i, o;
+
+	if(strlen(message) > 255) {
+		ast_log(AST_LOG_WARNING, "TddTx: length exceeds 255, message will be truncated.");
+	}
+
+	/* decode escapes */
+	for(i=0,o=0; i < 256; i++) {
+		if(i < (strlen(message) -1) && message[i] == '\\') {
+			switch(message[i + 1]) {
+			case '0': /* NUL */
+				i++;
+				buf[o++] = '\0';
+				break;
+			case 'a': /* BEL */
+				i++;
+				buf[o++] = '\a';
+				break;
+			case 'r':
+				i++;
+				buf[o++] = '\r';
+				break;
+			case 'n':
+				i++;
+				buf[o++] = '\n';
+				break;
+			default:
+				buf[o++] = message[i];
+			}
+		} else {
+			buf[o++] = message[i];
+		}
+	}
+	buf[o] = '\0';
+
+	ast_mutex_lock(&ti->v18_tx_lock);
+	v18_put(&ti->v18_state, buf, strlen(buf));
+	ti->chars_sent += strlen(buf);
+	ast_mutex_unlock(&ti->v18_tx_lock);
+}
+
+/*! \brief TddTx app exec
+ *
+ * \param chan the channel send TDD message on
+ * \param data args passed to the application in the dialplan (the message to send)
+ *
+ * returns if the datastore is not found
+ */
+static int tdd_tx_exec(struct ast_channel *chan, const char *data)
+{
+	struct ast_datastore *datastore = NULL;
+	struct tdd_info *ti = NULL;
+
+	ast_debug(1, "TddTx exec\n");
+
+	if (!chan) {
+		return -1;
+	}
+	
+        if (ast_strlen_zero(data)) {
+		ast_log(LOG_ERROR, "TddTx called with no message\n");
+		return -1;
+	}
+
+	ast_channel_lock(chan);
+
+	/* TODO: tx really only works when audiohook is getting write frames (like from a bridge) */
+/*
+	if(ast_channel_is_bridged(chan) == 0) {
+		ast_channel_unlock(chan);
+		ast_log(LOG_ERROR, "Channel is not bridged\n");
+		return -1;
+	}
+*/
+	if (!(datastore = ast_channel_datastore_find(chan, &tdd_datastore, NULL))) {
+		ast_channel_unlock(chan);
+		ast_log(LOG_ERROR, "TddTx TDD processing not enabled on %s\n", ast_channel_name(chan));
+		return -1;
+	}
+	ast_channel_unlock(chan);
+
+	ti = datastore->data;
+
+	tdd_send_message(ti, data);
+	
+	return 0;
+}
+
+/*! \brief Manager command TddTx exec
  */
 static int manager_tddtx(struct mansession *s, const struct message *m)
 {
@@ -597,9 +727,9 @@ static int manager_tddtx(struct mansession *s, const struct message *m)
 
 	ast_channel_lock(c);
 
-	/* tx really only works when audiohook is getting write frames (like from a bridge) */
+	/* TODO: tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
-	if(ast_channel_is_bridged(chan) == 0) {
+	if(ast_channel_is_bridged(c) == 0) {
 		ast_channel_unlock(c);
 		ast_channel_unref(c);
 		astman_send_error(s, m, "Channel is not bridged");
@@ -618,12 +748,7 @@ static int manager_tddtx(struct mansession *s, const struct message *m)
 
 	ti = datastore->data;
 
-	ast_mutex_lock(&ti->v18_tx_lock);
-	/* TODO: decode \ escapes first, like \r \n \" etc */
-	v18_put(&ti->v18_state, message, strlen(message));
-	ast_mutex_unlock(&ti->v18_tx_lock);
-
-	ti->chars_sent += strlen(message);
+	tdd_send_message(ti, message);
 
 	astman_append(s, "Response: Success\r\n");
 
@@ -685,11 +810,11 @@ static char *handle_cli_tdd(struct ast_cli_entry *e, int cmd, struct ast_cli_arg
 	}
 
 	ast_channel_lock(chan);
-	/* tx really only works when audiohook is getting write frames (like from a bridge) */
+	/* TODO: tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
 	if(ast_channel_is_bridged(chan) == 0) {
-		ast_channel_unlock(c);
-		ast_channel_unref(c);
+		ast_channel_unlock(chan);
+		ast_channel_unref(chan);
 		ast_cli(a->fd, "Channel is not bridged");
 		return CLI_SUCCESS;
 	}
@@ -707,10 +832,7 @@ static char *handle_cli_tdd(struct ast_cli_entry *e, int cmd, struct ast_cli_arg
 	ti = datastore->data;
 
 	if (!strcasecmp(a->argv[1], "send")) {
-		ast_mutex_lock(&ti->v18_tx_lock);
-		v18_put(&ti->v18_state, a->argv[3], strlen(a->argv[3]));
-		ti->chars_sent += strlen(a->argv[3]);
-		ast_mutex_unlock(&ti->v18_tx_lock);
+		tdd_send_message(ti, a->argv[3]);
 	} else { /* show */
 		ast_cli(a->fd, "Statistics for %s\n\n", a->argv[2]);
 		ast_cli(a->fd, "  Carrier transitions: %ld\n", ti->carrier_trans);
@@ -725,7 +847,8 @@ static struct ast_cli_entry cli_tdd[] = {
 	AST_CLI_DEFINE(handle_cli_tdd, "Execute a TDD command")
 };
 
-static char *app = "TddRx";
+static char *rxapp = "TddRx";
+static char *txapp = "TddTx";
 
 static int unload_module(void) {
 	int res;
@@ -734,7 +857,8 @@ static int unload_module(void) {
 	STASIS_MESSAGE_TYPE_CLEANUP(tdd_rx_msg_type);
 	STASIS_MESSAGE_TYPE_CLEANUP(tdd_stop_type);
 	ast_cli_unregister_multiple(cli_tdd, ARRAY_LEN(cli_tdd));
-	res = ast_unregister_application(app);
+	res = ast_unregister_application(rxapp);
+	res = ast_unregister_application(txapp);
 	res |= ast_manager_unregister("TddTx");
 
 	return res;
@@ -747,10 +871,11 @@ static int load_module(void) {
 	STASIS_MESSAGE_TYPE_INIT(tdd_rx_msg_type);
 	STASIS_MESSAGE_TYPE_INIT(tdd_stop_type);
 	ast_cli_register_multiple(cli_tdd, ARRAY_LEN(cli_tdd));
-	res = ast_register_application_xml(app, tdd_rx_exec);
+	res = ast_register_application_xml(rxapp, tdd_rx_exec);
+	res = ast_register_application_xml(txapp, tdd_tx_exec);
 	res |= ast_manager_register_xml("TddTx", EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL, manager_tddtx);
 
 	return res;
 }
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "TDD receive application");
+AST_MODULE_INFO_STANDARD_EXTENDED(ASTERISK_GPL_KEY, "TDD receive application");
