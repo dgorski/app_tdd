@@ -537,8 +537,8 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	ast_channel_lock(chan);
 	if ((datastore = ast_channel_datastore_find(chan, &tdd_datastore, NULL))) {
 		ast_channel_unlock(chan);
-		ast_log(LOG_ERROR, "TddRx TDD processing already enabled on %s\n", ast_channel_name(chan));
-		return -1;
+		ast_debug(1, "TddRx TDD processing already enabled on %s\n", ast_channel_name(chan));
+		return 0;
 	}
 	ast_channel_unlock(chan);
 
