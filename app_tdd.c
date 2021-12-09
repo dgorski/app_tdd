@@ -42,9 +42,25 @@
 		<synopsis>
 			Enable TDD transmit/receive processing on a channel.
 		</synopsis>
-		<syntax />
+		<syntax>
+			<parameter name="options">
+				<optionlist>
+					<option name="b">
+						<argument name="bufsiz" required="true">
+							<para>Specify a custom input buffer size. This controls received character delivery via manager/stasis events (a smaller value means more messages with less rx chars in each). Valid values are 1-256.</para>
+						</argument>
+					</option>
+					<option name="c">
+						<argument name="correlation" required="true">
+							<para>Provide a correlation string for this channel, will be sent with TddRxMsg events.</para>
+						</argument>
+					</option>
+				</optionlist>
+			</parameter>
+		</syntax>
 		<description>
 			<para>The TddRx application is used to begin listening for TDD tones from the channel.  If TDD tones are detected, the received message will be posted via manager/stasis events for this channel.</para>
+			<para> </para>
 			<para>This application will exit immediately after setting up an audiohook.</para>
 		</description>
 	</application>
@@ -57,6 +73,7 @@
 		</syntax>
 		<description>
 			<para>Sends TDD tones to the channel in the same way as the TddTx manager action.</para>
+			<para> </para>
 			<para>If TDD processing is not enabled via TddRx, will return an error.</para>
 		</description>
 		<see-also>
@@ -76,7 +93,7 @@
 			<parameter name="Message" required="true">
 				<para>The message to be sent.</para>
 				<para> </para>
-				<note><para>TDD uses ITA2 (BAUDOT) code which limits the characters that can be sent. This app uses the US TTY variant of ITA2. Characters not included in ITA2 are silently ignored.</para></note>
+				<note><para>TDD uses ITA2_US_TTY (BAUDOT) code which limits the characters that can be sent. Unsupported characters are silently ignored.</para></note>
 			</parameter>
 		</syntax>
 		<description>
@@ -93,6 +110,9 @@
 				<channel_snapshot/>
 				<parameter name="Message">
 					<para>The TDD message received.</para>
+				</parameter>
+				<parameter name="Correlation">
+					<para>The Tdd instance Correlation value if specified.</para>
 				</parameter>
 			</syntax>
 		</managerEventInstance>
@@ -201,12 +221,34 @@ struct tdd_info {
 	v18_state_t v18_state;          /* V.18 (45.45/TDD) modem state */
 	int rx_status;                  /* rx state (carrier up/down) */
 	ast_mutex_t v18_tx_lock;        /* thread safe tx */
+	unsigned int bufsiz;            /* receive buffer size */
+	char *correlation;              /* a correlation ID for RX messages*/
 
 	/* debug stats */
 	long carrier_trans;             /* how many carrier transitions */
 	long chars_recv;                /* actual received chars */
 	long chars_sent;                /* sent chars */
 };
+
+enum starttddrx_flags {
+	MUXFLAG_BUFSIZE = (1 << 0),
+	MUXFLAG_CORRELATION = (1 << 1),
+/*      MUXFLAG_NON_US_TTY = (1 << 2),*//* selects 50bps, ITA_2_STD chars */
+};
+
+enum starttddrx_args {
+	OPT_ARG_BUFSIZE,
+	OPT_ARG_CORRELATION,
+/*      OPT_ARG_NON_US_TTY, */
+	OPT_ARG_ARRAY_SIZE, /* Always the last element of the enum */
+};
+
+AST_APP_OPTIONS(starttddrx_opts, {
+	AST_APP_OPTION_ARG('b', MUXFLAG_BUFSIZE, OPT_ARG_BUFSIZE),
+	AST_APP_OPTION_ARG('u', MUXFLAG_CORRELATION, OPT_ARG_CORRELATION),
+/*      AST_APP_OPTION_ARG('i', MUXFLAG_NON_US_TTY, OPT_ARG_NON_US_TTY), */
+});
+
 
 /*! \brief Send spandsp log messages to asterisk.
  * \param level the spandsp logging level
@@ -306,7 +348,7 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 		span_log(&s->logging, SPAN_LOG_FLOW, "baudot returned zero");
 	}
 
-	if (s->rx_msg_len >= 256)
+	if (s->rx_msg_len >= ti->bufsiz)
 	{
 		s->rx_msg[s->rx_msg_len] = '\0';
 		span_log(&s->logging, SPAN_LOG_FLOW, "[bufsiz] calling put_msg with %d chars", s->rx_msg_len);
@@ -329,7 +371,7 @@ static void destroy_callback(void *data)
 
 	ast_debug(1, "TddRx datastore destroy callback\n");
 
-	/* 
+	/*
 	 * TODO: this is too late in channel lifecycle to send TddStop events as the channel
 	 * is already gone.  Need to figure out how to hook channel destruction sooner in the
 	 * destroy phase.
@@ -338,9 +380,15 @@ static void destroy_callback(void *data)
 	 */
 	chan = ast_channel_get_by_name(ti->name);
 	if(chan) {
-		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStop", "Channel: %s\r\n", ti->name);
+		if(!ast_strlen_zero(ti->correlation)) {
+			ast_manager_event(chan, EVENT_FLAG_CALL, "TddSop", "Channel: %s\r\n", ti->name);
 
-		stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "inactive");
+			stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "inactive");
+		} else {
+			ast_manager_event(chan, EVENT_FLAG_CALL, "TddStop", "Channel: %s\r\nCorrelation: %s\r\n", ti->name, ti->correlation);
+
+			stasis_message_blob = ast_json_pack("{s: s, s: s}", "tddstatus", "inactive", "correlation", ti->correlation);
+		}
 
 		ast_channel_lock(chan);
 
@@ -474,10 +522,16 @@ static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 	}
 	buf[o] = '\0';
 
-	ast_manager_event(chan, EVENT_FLAG_CALL, "TddRxMsg",
-		"Channel: %s\r\nMessage: %s\r\n", ti->name, buf);
-
-	stasis_message_blob = ast_json_pack("{s: s}", "message", msg);
+	if(ast_strlen_zero(ti->correlation)) {
+		ast_manager_event(chan, EVENT_FLAG_CALL, "TddRxMsg",
+			"Channel: %s\r\nMessage: %s\r\n", ti->name, buf);
+		stasis_message_blob = ast_json_pack("{s: s}", "message", msg);
+	} else {
+		ast_manager_event(chan, EVENT_FLAG_CALL, "TddRxMsg",
+			"Channel: %s\r\nMessage: %s\r\nCorrelation: %s\r\n",
+			ti->name, buf, ti->correlation);
+		stasis_message_blob = ast_json_pack("{s: s, s: s}", "message", msg, "correlation", ti->correlation);
+	}
 
 	ast_channel_lock(chan);
 
@@ -509,6 +563,58 @@ static void modem_rx_status(void *user_data, int status)
 
 	/* forward status to the V.18 receiver we apparently stole the hook from */
 	my_v18_tdd_put_async_byte(ti, status);
+}
+
+/*! \brief process TddRx app exec arguments
+ *
+ */
+static void starttddrx_process_args(struct tdd_info *ti, const char *data)
+{
+	struct ast_flags flags = { 0 };
+	char *parse;
+	char *opts[OPT_ARG_ARRAY_SIZE] = { NULL, };
+
+	unsigned int bufsiz = 256;
+	char *correlation = NULL;
+
+	AST_DECLARE_APP_ARGS(args,
+		AST_APP_ARG(options);
+		AST_APP_ARG(other);             /* Any remaining unused arguments */
+	);
+
+	parse = ast_strdupa(data);
+	AST_STANDARD_APP_ARGS(args, parse);
+
+	if (args.options) {
+		ast_app_parse_options(starttddrx_opts, &flags, opts, args.options);
+		if (ast_test_flag(&flags, MUXFLAG_BUFSIZE)) {
+			if (ast_strlen_zero(opts[OPT_ARG_BUFSIZE])) {
+				ast_log(LOG_WARNING, "Ignoring buffer size option 'b': No value provided.\n");
+			} else {
+				if (sscanf(opts[OPT_ARG_BUFSIZE], "%u", &bufsiz) != 1 ) {
+					ast_log(LOG_WARNING, "Ignoring buffer size option: could not parse numeric value.\n");
+				} else {
+					if(bufsiz < 1 || bufsiz > 256) {
+						ast_log(LOG_WARNING, "Ignoring buffer size option: value out of range (1-256).\n");
+						bufsiz = 256;
+					}
+				}
+			}
+		}
+		if (ast_test_flag(&flags, MUXFLAG_CORRELATION)) {
+			if (ast_strlen_zero(opts[OPT_ARG_CORRELATION])) {
+				ast_log(LOG_WARNING, "Ignoring correlation option 'u': No value provided.\n");
+			} else {
+				correlation = opts[OPT_ARG_CORRELATION];
+			}
+		}
+	}
+
+	ti->bufsiz = bufsiz; /* might be default, might be arg */
+
+	if(!ast_strlen_zero(correlation)) {
+		ti->correlation = ast_strdup(correlation);
+	}
 }
 
 /*! \brief TddRx app exec
@@ -558,6 +664,8 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 		return -1;
 	}
 
+	starttddrx_process_args(ti, data);
+
 	ti->rx_status = SIG_STATUS_CARRIER_DOWN; /* init status field with a sane value */
 
 	v18_init(&ti->v18_state, 0, V18_MODE_5BIT_45, tdd_put_msg, ti);
@@ -583,9 +691,15 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	ast_channel_unlock(chan);
 	ast_audiohook_attach(chan, &ti->audiohook);
 
-	ast_manager_event(chan, EVENT_FLAG_CALL, "TddStart", "Channel: %s\r\n", ti->name);
+	if(!ast_strlen_zero(ti->correlation)) {
+		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStart", "Channel: %s\r\n", ti->name);
 
-	stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "active");
+		stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "active");
+	} else {
+		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStart", "Channel: %s\r\nCorrelation: %s\r\n", ti->name, ti->correlation);
+
+		stasis_message_blob = ast_json_pack("{s: s, s: s}", "tddstatus", "active", "correlation", ti->correlation);
+	}
 
 	ast_channel_lock(chan);
 
@@ -670,8 +784,8 @@ static int tdd_tx_exec(struct ast_channel *chan, const char *data)
 	if (!chan) {
 		return -1;
 	}
-	
-        if (ast_strlen_zero(data)) {
+
+	if (ast_strlen_zero(data)) {
 		ast_log(LOG_ERROR, "TddTx called with no message\n");
 		return -1;
 	}
@@ -696,7 +810,7 @@ static int tdd_tx_exec(struct ast_channel *chan, const char *data)
 	ti = datastore->data;
 
 	tdd_send_message(ti, data);
-	
+
 	return 0;
 }
 
