@@ -47,9 +47,6 @@
 			<para>The TddRx application is used to begin listening for TDD tones from the channel.  If TDD tones are detected, the received message will be posted via manager/stasis events for this channel.</para>
 			<para>This application will exit immediately after setting up an audiohook.</para>
 		</description>
-		<see-also>
-			<ref type="function">AUDIOHOOK_INHERIT</ref>
-		</see-also>
 	</application>
 	<application name="TddTx" language="en_US">
 		<synopsis>
