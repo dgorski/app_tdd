@@ -53,7 +53,7 @@
 	</application>
 	<application name="TddTx" language="en_US">
 		<synopsis>
-			Send <replaceable>message</replaceable> using TDD tones on the current channel.
+			Send message using TDD tones on the current channel.
 		</synopsis>
 		<syntax>
 			<parameter name="message" required="true" />
@@ -78,7 +78,7 @@
 			</parameter>
 			<parameter name="Message" required="true">
 				<para>The message to be sent.</para>
-				<para><note>NOTE:</note> TDD uses BAUDOT code which limits the characters that can be sent. Invalid characters are silently ignored.</para>
+				<note><para>NOTE: TDD uses BAUDOT code which limits the characters that can be sent. Invalid characters are silently ignored.</para></note>
 			</parameter>
 		</syntax>
 		<description>
