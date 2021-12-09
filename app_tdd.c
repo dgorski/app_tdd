@@ -525,6 +525,9 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	struct ast_datastore *datastore = NULL;
 	struct tdd_info *ti = NULL;
 
+	v18_state_t *vs = NULL;
+	fsk_rx_state_t *fs = NULL;
+
 	RAII_VAR(struct stasis_message *, stasis_message, NULL, ao2_cleanup);
 	RAII_VAR(struct ast_json *, stasis_message_blob, NULL, ast_json_unref);
 
@@ -563,8 +566,9 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 
 	set_logging(v18_get_logging_state(&ti->v18_state));
 
-	v18_state_t *vs = &ti->v18_state;
-	fsk_rx_state_t *fs = &vs->fskrx;
+	vs = &ti->v18_state;
+	fs = &vs->fskrx;
+
 	fsk_rx_set_modem_status_handler(fs, modem_rx_status, ti); /* override */
 	fsk_rx_set_put_bit(fs, my_v18_tdd_put_async_byte, ti);    /* override */
 
