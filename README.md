@@ -20,7 +20,6 @@ Things that work so far:
 
 Things that still need work:
 
-- implement/complete TddRx options processing (buffer size, unique ids, 45.45 vs 50 baud selection)
 - rename to TddRx to StartTddRx to better reflect how it works
 - add StopTddRx to remove existing TDD processing from a channel
 - dialplan APP to send TDD on a channel added, not completely tested
