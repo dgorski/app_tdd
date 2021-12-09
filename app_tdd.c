@@ -76,7 +76,7 @@
 			<parameter name="Message" required="true">
 				<para>The message to be sent.</para>
 				<para> </para>
-				<note><para>TDD uses BAUDOT code which limits the characters that can be sent. Invalid characters are silently ignored.</para></note>
+				<note><para>TDD uses ITA2 (BAUDOT) code which limits the characters that can be sent. This app uses the US TTY variant of ITA2. Characters not included in ITA2 are silently ignored.</para></note>
 			</parameter>
 		</syntax>
 		<description>
