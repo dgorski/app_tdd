@@ -6,6 +6,8 @@ The goal of app_tdd is to effectively filter out TDD tones coming in on a channe
 
 This allows for centralized TDD processing (rather than requiring TDD/TTY hardware or software at the user endpoint).
 
+app_tdd.c contained here compiles cleanly under asterisk 18.8.0.
+
 Things that work so far:
 
 - the receiver does receive TDD (FSK @ 45.45 baud)
@@ -18,11 +20,13 @@ Things that work so far:
 
 Things that still need work:
 
-- dialplan APP to send TDD on a channel added, not yet tested
+- implement/complete TddRx options processing (buffer size, unique ids, 45.45 vs 50 baud selection)
+- rename to TddRx to StartTddRx to better reflect how it works
+- add StopTddRx to remove existing TDD processing from a channel
+- dialplan APP to send TDD on a channel added, not completely tested
 - received messages should be encoded as they may contain control sequences (\r \n \0 etc)
   - some of this is implemented, need to test/complete
 - the send AMI and CLI commands should also use some sort of encoding in order to send supported baudot specials
   - some of this is implemented, need to test/complete
 - fix AMI/ARI events for TddStop (TddStart is properly emitted)
 
-app_tdd.c contained here compiles cleanly under asterisk 18.4.0.
