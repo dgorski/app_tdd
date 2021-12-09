@@ -75,7 +75,8 @@
 			</parameter>
 			<parameter name="Message" required="true">
 				<para>The message to be sent.</para>
-				<note><para>NOTE: TDD uses BAUDOT code which limits the characters that can be sent. Invalid characters are silently ignored.</para></note>
+				<para> </para>
+				<note><para>TDD uses BAUDOT code which limits the characters that can be sent. Invalid characters are silently ignored.</para></note>
 			</parameter>
 		</syntax>
 		<description>
