@@ -381,7 +381,7 @@ static void destroy_callback(void *data)
 	chan = ast_channel_get_by_name(ti->name);
 	if(chan) {
 		if(ast_strlen_zero(ti->correlation)) {
-			ast_manager_event(chan, EVENT_FLAG_CALL, "TddSop", "Channel: %s\r\n", ti->name);
+			ast_manager_event(chan, EVENT_FLAG_CALL, "TddStop", "Channel: %s\r\n", ti->name);
 
 			stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "inactive");
 		} else {
@@ -691,7 +691,7 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	ast_channel_unlock(chan);
 	ast_audiohook_attach(chan, &ti->audiohook);
 
-	if(!ast_strlen_zero(ti->correlation)) {
+	if(ast_strlen_zero(ti->correlation)) {
 		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStart", "Channel: %s\r\n", ti->name);
 
 		stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "active");
