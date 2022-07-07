@@ -50,10 +50,13 @@
 							<para>Specify a custom input buffer size. This controls received character delivery via manager/stasis events (a smaller value means more messages with less rx chars in each). Valid values are 1-256.</para>
 						</argument>
 					</option>
-					<option name="u">
+					<option name="c">
 						<argument name="correlation" required="true">
 							<para>Provide a correlation string for this channel, will be sent with TddRxMsg events.</para>
 						</argument>
+					</option>
+					<option name="s">
+						<para>Send spaces as underscores in TddRxMsg events.</para>
 					</option>
 				</optionlist>
 			</parameter>
@@ -223,6 +226,7 @@ struct tdd_info {
 	ast_mutex_t v18_tx_lock;        /* thread safe tx */
 	unsigned int bufsiz;            /* receive buffer size */
 	char *correlation;              /* a correlation ID for RX messages*/
+	int underscores;		/* send received space chars as underscores */
 
 	/* debug stats */
 	long carrier_trans;             /* how many carrier transitions */
@@ -233,7 +237,8 @@ struct tdd_info {
 enum starttddrx_flags {
 	MUXFLAG_BUFSIZE = (1 << 0),
 	MUXFLAG_CORRELATION = (1 << 1),
-/*      MUXFLAG_NON_US_TTY = (1 << 2),*//* selects 50bps, ITA_2_STD chars */
+	MUXFLAG_UNDERSCORES = (1 << 2),
+/*      MUXFLAG_NON_US_TTY = (1 << 3),*/ /* selects 50bps, ITA_2_STD chars */
 };
 
 enum starttddrx_args {
@@ -245,7 +250,8 @@ enum starttddrx_args {
 
 AST_APP_OPTIONS(starttddrx_opts, {
 	AST_APP_OPTION_ARG('b', MUXFLAG_BUFSIZE, OPT_ARG_BUFSIZE),
-	AST_APP_OPTION_ARG('u', MUXFLAG_CORRELATION, OPT_ARG_CORRELATION),
+	AST_APP_OPTION_ARG('c', MUXFLAG_CORRELATION, OPT_ARG_CORRELATION),
+	AST_APP_OPTION('s', MUXFLAG_UNDERSCORES),
 /*      AST_APP_OPTION_ARG('i', MUXFLAG_NON_US_TTY, OPT_ARG_NON_US_TTY), */
 });
 
@@ -511,11 +517,13 @@ static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 		return;
 	}
 
-	/* escape \n for manager */
+	/* escape \n for manager, optionally replace space with underscore */
 	for(i=0, o=0; i < len; i++) {
 		if(msg[i] == '\n') {
 			buf[o++] = '\\';
 			buf[o++] = 'n';
+		} else if(msg[i] == ' ' && ti->underscores == 1) {
+			buf[o++] = '_';
 		} else {
 			buf[o++] = msg[i];
 		}
@@ -576,6 +584,7 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 
 	unsigned int bufsiz = 256;
 	char *correlation = NULL;
+	int underscores = 0;
 
 	AST_DECLARE_APP_ARGS(args,
 		AST_APP_ARG(options);
@@ -608,6 +617,9 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 				correlation = opts[OPT_ARG_CORRELATION];
 			}
 		}
+		if (ast_test_flag(&flags, MUXFLAG_UNDERSCORES)) {
+			underscores = 1;
+		}
 	}
 
 	ti->bufsiz = bufsiz; /* might be default, might be arg */
@@ -615,6 +627,8 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 	if(!ast_strlen_zero(correlation)) {
 		ti->correlation = ast_strdup(correlation);
 	}
+	
+	ti->underscores = underscores;
 }
 
 /*! \brief TddRx app exec
