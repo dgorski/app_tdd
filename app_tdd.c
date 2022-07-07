@@ -50,7 +50,7 @@
 							<para>Specify a custom input buffer size. This controls received character delivery via manager/stasis events (a smaller value means more messages with less rx chars in each). Valid values are 1-256.</para>
 						</argument>
 					</option>
-					<option name="c">
+					<option name="u">
 						<argument name="correlation" required="true">
 							<para>Provide a correlation string for this channel, will be sent with TddRxMsg events.</para>
 						</argument>
