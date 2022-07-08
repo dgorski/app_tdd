@@ -66,6 +66,8 @@
 			<para> </para>
 			<para>This application will exit immediately after setting up an audiohook.</para>
 		</description>
+		<see-also>
+		</see-also>
 	</application>
 	<application name="TddTx" language="en_US">
 		<synopsis>
@@ -104,6 +106,26 @@
 		</description>
 		<see-also>
 			<ref type="link">https://en.wikipedia.org/wiki/Baudot_code#ITA_2_and_US-TTY</ref>
+		</see-also>
+	</manager>
+	<manager name="TddRx" language="en_US">
+		<synopsis>
+			Enable TDD transmit/receive processing on a channel.
+		</synopsis>
+		<syntax>
+			<xi:include xpointer="xpointer(/docs/manager[@name='Login']/syntax/parameter[@name='ActionID'])" />
+			<parameter name="Channel" required="true">
+				<para>The name of the channel to enable TDD processing on.</para>
+			</parameter>
+			<parameter name="Options" required="false">
+				<para>Options string, using the same syntax as the TddRx dialplan app.</para>
+			</parameter>
+		</syntax>
+		<description>
+			<para>This action is exactly the same as the dialplan command of the same name - it enables TDD processing on the specified channel.</para>
+		</description>
+		<see-also>
+			<ref type="application">TddRx</ref>
 		</see-also>
 	</manager>
 	<managerEvent language="en_US" name="TddRxMsg">
@@ -631,14 +653,14 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 	ti->underscores = underscores;
 }
 
-/*! \brief TddRx app exec
+/*! \brief Enable TDD processing on a channel
  *
  * \param chan the channel to add the audiohook on
- * \param data args passed to the application in the dialplan (currently not used)
+ * \param data args passed to the application in the dialplan or via manager Options field
  *
- * adds the audiohook if there isn't one, otherwise just return
+ * adds the audiohook if there isn't one
  */
-static int tdd_rx_exec(struct ast_channel *chan, const char *data)
+static int do_tdd_rx(struct ast_channel *chan, const char *data)
 {
 	struct ast_datastore *datastore = NULL;
 	struct tdd_info *ti = NULL;
@@ -659,7 +681,7 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	if ((datastore = ast_channel_datastore_find(chan, &tdd_datastore, NULL))) {
 		ast_channel_unlock(chan);
 		ast_debug(1, "TddRx TDD processing already enabled on %s\n", ast_channel_name(chan));
-		return 0;
+		return 1;
 	}
 	ast_channel_unlock(chan);
 
@@ -668,14 +690,14 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	/* Allocate a new datastore to hold the reference to tdd info */
 	if (!(datastore = ast_datastore_alloc(&tdd_datastore, NULL))) {
 		ast_log(AST_LOG_ERROR, "TddRx failed to create datastore\n");
-		return -1;
+		return 2;
 	}
 
 	/* allocate the tdd info struct */
 	if (!(ti = ast_calloc(1, sizeof(*ti)))) {
 		ast_log(AST_LOG_ERROR, "TddRx failed to calloc tdd_info\n");
 		ast_datastore_free(datastore);
-		return -1;
+		return 3;
 	}
 
 	starttddrx_process_args(ti, data);
@@ -728,6 +750,79 @@ static int tdd_rx_exec(struct ast_channel *chan, const char *data)
 	ast_channel_unlock(chan);
 
 	return 0;
+}
+
+/*! \brief TddRx app exec
+ *
+ * \param chan the channel to add the audiohook on
+ * \param data args passed to the application in the dialplan (currently not used)
+ *
+ * adds the audiohook if there isn't one, otherwise just return
+ */
+static int tdd_rx_exec(struct ast_channel *chan, const char *data)
+{
+	int result = do_tdd_rx(chan, data);
+
+	switch (result) {
+	case 0:
+	case 1:
+		return 0;
+	default:
+		return -1;
+	}
+}
+
+/*! \brief Manager command TddRx exec
+ *
+ */
+static int manager_tddrx(struct mansession *s, const struct message *m)
+{
+	struct ast_channel *chan;
+	int result;
+	
+	const char *name = astman_get_header(m, "Channel");
+	const char *id = astman_get_header(m, "ActionID");
+	const char *opts = astman_get_header(m, "Options");
+
+	if (ast_strlen_zero(name)) {
+		astman_send_error(s, m, "No channel specified");
+		return AMI_SUCCESS;
+	}
+
+	chan = ast_channel_get_by_name(name);
+	if (!chan) {
+		astman_send_error(s, m, "No such channel");
+		return AMI_SUCCESS;
+	}
+
+	result = do_tdd_rx(chan, opts);
+
+	switch (result) {
+	case 0:
+		astman_append(s, "Response: Success\r\n");
+		if (!ast_strlen_zero(id)) {
+			astman_append(s, "ActionID: %s\r\n", id);
+		}
+		astman_append(s, "\r\n");
+		return AMI_SUCCESS;
+
+	case 1:
+		astman_send_error(s, m, "TddRx TDD processing already enabled on this channel");
+		return AMI_SUCCESS;
+
+	case 2:
+		astman_send_error(s, m, "TddRx failed to create datastore");
+		return AMI_SUCCESS;
+	
+	case 3:
+		astman_send_error(s, m, "TddRx failed to calloc tdd_info");
+		return AMI_SUCCESS;
+
+	default: /* not reached */
+		astman_send_error(s, m, "Unspecified error enabling TDD on this channel");
+		return AMI_SUCCESS;
+
+	}
 }
 
 /*! \brief adds a message to the V.18 modem tx queue
@@ -988,8 +1083,9 @@ static int unload_module(void) {
 	STASIS_MESSAGE_TYPE_CLEANUP(tdd_stop_type);
 	ast_cli_unregister_multiple(cli_tdd, ARRAY_LEN(cli_tdd));
 	res = ast_unregister_application(rxapp);
-	res = ast_unregister_application(txapp);
-	res |= ast_manager_unregister("TddTx");
+	res |= ast_unregister_application(txapp);
+	res |= ast_manager_unregister(rxapp);
+	res |= ast_manager_unregister(txapp);
 
 	return res;
 }
@@ -1002,8 +1098,9 @@ static int load_module(void) {
 	STASIS_MESSAGE_TYPE_INIT(tdd_stop_type);
 	ast_cli_register_multiple(cli_tdd, ARRAY_LEN(cli_tdd));
 	res = ast_register_application_xml(rxapp, tdd_rx_exec);
-	res = ast_register_application_xml(txapp, tdd_tx_exec);
-	res |= ast_manager_register_xml("TddTx", EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL, manager_tddtx);
+	res |= ast_register_application_xml(txapp, tdd_tx_exec);
+	res |= ast_manager_register_xml(rxapp, EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL, manager_tddrx);
+	res |= ast_manager_register_xml(txapp, EVENT_FLAG_SYSTEM | EVENT_FLAG_CALL, manager_tddtx);
 
 	return res;
 }
