@@ -67,6 +67,8 @@
 			<para>This application will exit immediately after setting up an audiohook.</para>
 		</description>
 		<see-also>
+			<ref type="application">TddTx</ref>
+			<ref type="manager">TddRx</ref>
 		</see-also>
 	</application>
 	<application name="TddTx" language="en_US">
