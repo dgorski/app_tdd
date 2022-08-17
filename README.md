@@ -11,7 +11,7 @@ app_tdd.c contained here compiles cleanly under asterisk 18.8.0.
 Things that work so far:
 
 - the receiver does receive TDD (FSK @ 45.45bps, 50bps support added but untested)
-- the transmitter does transmit TDD (as above, 45.45 and 50bps supported)
+- the transmitter does transmit TDD (as above)
 - transmitter and receiver have been tested with real TDD TTY hardware (Ultratec 1140)
 - Also tested with a real iPhone RTT (via PSTN)
 - AMI events are raised when a TDD message is received
