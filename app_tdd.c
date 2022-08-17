@@ -550,7 +550,7 @@ static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 		if(msg[i] == '\n') {
 			buf[o++] = '\\';
 			buf[o++] = 'n';
-		if(msg[i] == '\r') {
+		} else if(msg[i] == '\r') {
 			buf[o++] = '\\';
 			buf[o++] = 'r';
 		} else if(msg[i] == ' ' && ti->underscores == 1) {
