@@ -58,6 +58,9 @@
 					<option name="s">
 						<para>Send spaces as underscores in TddRxMsg events.</para>
 					</option>
+					<option name="i">
+						<para>Use International TTY @ 50 bps instead of US TTY @ 45.45.</para>
+					</option>
 				</optionlist>
 			</parameter>
 		</syntax>
@@ -245,12 +248,13 @@ STASIS_MESSAGE_TYPE_DEFN_LOCAL(tdd_stop_type,
 struct tdd_info {
 	struct ast_audiohook audiohook; /* access to the audio streams */
 	char *name;                     /* associated channel name */
-	v18_state_t v18_state;          /* V.18 (45.45/TDD) modem state */
+	v18_state_t v18_state;          /* spandsp V.18 modem state */
 	int rx_status;                  /* rx state (carrier up/down) */
 	ast_mutex_t v18_tx_lock;        /* thread safe tx */
 	unsigned int bufsiz;            /* receive buffer size */
 	char *correlation;              /* a correlation ID for RX messages*/
-	int underscores;		/* send received space chars as underscores */
+	char underscores;		/* send received space chars as underscores */
+	char international;		/* use Int'l 50bps mode instead of US 45.45 */
 
 	/* debug stats */
 	long carrier_trans;             /* how many carrier transitions */
@@ -262,13 +266,13 @@ enum starttddrx_flags {
 	MUXFLAG_BUFSIZE = (1 << 0),
 	MUXFLAG_CORRELATION = (1 << 1),
 	MUXFLAG_UNDERSCORES = (1 << 2),
-/*      MUXFLAG_NON_US_TTY = (1 << 3),*/ /* selects 50bps, ITA_2_STD chars */
+	MUXFLAG_NON_US_TTY = (1 << 3), /* selects 50bps, TODO: also translate to ITA_2_STD figs */
 };
 
 enum starttddrx_args {
 	OPT_ARG_BUFSIZE,
 	OPT_ARG_CORRELATION,
-/*      OPT_ARG_NON_US_TTY, */
+			      
 	OPT_ARG_ARRAY_SIZE, /* Always the last element of the enum */
 };
 
@@ -276,7 +280,7 @@ AST_APP_OPTIONS(starttddrx_opts, {
 	AST_APP_OPTION_ARG('b', MUXFLAG_BUFSIZE, OPT_ARG_BUFSIZE),
 	AST_APP_OPTION_ARG('c', MUXFLAG_CORRELATION, OPT_ARG_CORRELATION),
 	AST_APP_OPTION('s', MUXFLAG_UNDERSCORES),
-/*      AST_APP_OPTION_ARG('i', MUXFLAG_NON_US_TTY, OPT_ARG_NON_US_TTY), */
+	AST_APP_OPTION('i', MUXFLAG_NON_US_TTY),
 });
 
 
@@ -541,11 +545,14 @@ static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 		return;
 	}
 
-	/* escape \n for manager, optionally replace space with underscore */
+	/* escape \r and \n for manager, optionally replace space with underscore */
 	for(i=0, o=0; i < len; i++) {
 		if(msg[i] == '\n') {
 			buf[o++] = '\\';
 			buf[o++] = 'n';
+		if(msg[i] == '\r') {
+			buf[o++] = '\\';
+			buf[o++] = 'r';
 		} else if(msg[i] == ' ' && ti->underscores == 1) {
 			buf[o++] = '_';
 		} else {
@@ -608,7 +615,8 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 
 	unsigned int bufsiz = 256;
 	char *correlation = NULL;
-	int underscores = 0;
+	char underscores = 0;
+	char international = 0;
 
 	AST_DECLARE_APP_ARGS(args,
 		AST_APP_ARG(options);
@@ -644,6 +652,9 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 		if (ast_test_flag(&flags, MUXFLAG_UNDERSCORES)) {
 			underscores = 1;
 		}
+		if (ast_test_flag(&flags, MUXFLAG_NON_US_TTY)) {
+			international = 1;
+		}
 	}
 
 	ti->bufsiz = bufsiz; /* might be default, might be arg */
@@ -653,6 +664,7 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 	}
 	
 	ti->underscores = underscores;
+	ti->international = international;
 }
 
 /*! \brief Enable TDD processing on a channel
@@ -706,7 +718,11 @@ static int do_tdd_rx(struct ast_channel *chan, const char *data)
 
 	ti->rx_status = SIG_STATUS_CARRIER_DOWN; /* init status field with a sane value */
 
-	v18_init(&ti->v18_state, 0, V18_MODE_5BIT_45, tdd_put_msg, ti);
+	if(ti->international == 1) {
+		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_50, tdd_put_msg, ti);
+	} else {
+		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_45, tdd_put_msg, ti);
+	}
 
 	set_logging(v18_get_logging_state(&ti->v18_state));
 
