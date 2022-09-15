@@ -335,7 +335,7 @@ static void set_logging(logging_state_t *state)
 /*
   copied from the library as it is no longer visible
  */
-static uint8_t decode_baudot(v18_state_t *s, uint8_t ch)
+static uint8_t v18_decode_baudot(v18_state_t *s, uint8_t ch)
 {
     static const uint8_t conv[2][32] =
     {
