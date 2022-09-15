@@ -331,6 +331,34 @@ static void set_logging(logging_state_t *state)
 	span_log_set_level(state, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_DEBUG_3);
 }
 
+#if SPANDSP_RELEASE_DATE >= 20120902
+/*
+  copied from the library as it is no longer visible
+ */
+static uint8_t decode_baudot(v18_state_t *s, uint8_t ch)
+{
+    static const uint8_t conv[2][32] =
+    {
+        {"\bE\nA SIU\rDRJNFCKTZLWHYPQOBG^MXV^"},
+        {"\b3\n- -87\r$4',!:(5\")2=6019?+^./;^"}
+    };
+
+    switch (ch)
+    {
+    case BAUDOT_FIGURE_SHIFT:
+        s->baudot_rx_shift = 1;
+        break;
+    case BAUDOT_LETTER_SHIFT:
+        s->baudot_rx_shift = 0;
+        break;
+    default:
+        return conv[s->baudot_rx_shift][ch];
+    }
+    /* Return 0xFF if we did not produce a character */
+    return 0xFF;
+}
+#endif
+
 /*! \brief Callback for spandsp FSK bytes from the V.18 receiver
  *
  * \param user_data pointer to user data
@@ -377,11 +405,7 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 
 	span_log(&s->logging, SPAN_LOG_FLOW, "Rx byte %x; rs_msg_len=%d\n", byte, s->rx_msg_len);
 
-#if SPANDSP_RELEASE_DATE >= 20120902
-	if ((octet = decode_baudot(s, byte))) {
-#else
 	if ((octet = v18_decode_baudot(s, byte))) {
-#endif
 		span_log(&s->logging, SPAN_LOG_FLOW, "baudot returned 0x%x (%c)", octet, octet);
 		if (octet == 0x08) {
 			span_log(&s->logging, SPAN_LOG_FLOW, "filtering null/del (0x08)");
