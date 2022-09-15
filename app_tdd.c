@@ -301,6 +301,7 @@ static void spandsp_log(int level, const char *msg)
 	}
 }
 
+#if SPANDSP_RELEASE_DATE < 20120902
 /*! \brief Send spandsp log messages to asterisk.
  * \param level the spandsp logging level
  * \param msg the log message
@@ -311,6 +312,7 @@ static void spandsp_error_log(const char *msg)
 {
 	spandsp_log(SPAN_LOG_ERROR, msg);
 }
+#endif
 
 /*! \brief Hook spandsp logging to asterisk.
  *
@@ -318,8 +320,13 @@ static void spandsp_error_log(const char *msg)
  */
 static void set_logging(logging_state_t *state)
 {
+
+#if SPANDSP_RELEASE_DATE >= 20120902
+	span_log_set_message_handler(state, spandsp_log, NULL);
+#else
 	span_log_set_message_handler(state, spandsp_log);
 	span_log_set_error_handler(state, spandsp_error_log);
+#endif
 
 	span_log_set_level(state, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_DEBUG_3);
 }
@@ -369,7 +376,12 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 	}
 
 	span_log(&s->logging, SPAN_LOG_FLOW, "Rx byte %x; rs_msg_len=%d\n", byte, s->rx_msg_len);
+
+#if SPANDSP_RELEASE_DATE >= 20120902
+	if ((octet = decode_baudot(s, byte))) {
+#else
 	if ((octet = v18_decode_baudot(s, byte))) {
+#endif
 		span_log(&s->logging, SPAN_LOG_FLOW, "baudot returned 0x%x (%c)", octet, octet);
 		if (octet == 0x08) {
 			span_log(&s->logging, SPAN_LOG_FLOW, "filtering null/del (0x08)");
@@ -718,16 +730,29 @@ static int do_tdd_rx(struct ast_channel *chan, const char *data)
 
 	ti->rx_status = SIG_STATUS_CARRIER_DOWN; /* init status field with a sane value */
 
+#if SPANDSP_RELEASE_DATE >= 20120902
+	if(ti->international == 1) {
+		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_50, tdd_put_msg, ti, NULL);
+	} else {
+		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_45, tdd_put_msg, ti, NULL);
+	}
+#else
 	if(ti->international == 1) {
 		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_50, tdd_put_msg, ti);
 	} else {
 		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_45, tdd_put_msg, ti);
 	}
+#endif
 
 	set_logging(v18_get_logging_state(&ti->v18_state));
 
 	vs = &ti->v18_state;
+
+#if SPANDSP_RELEASE_DATE >= 20120902
+	fs = &vs->fsk_rx;
+#else
 	fs = &vs->fskrx;
+#endif
 
 	fsk_rx_set_modem_status_handler(fs, modem_rx_status, ti); /* override */
 	fsk_rx_set_put_bit(fs, my_v18_tdd_put_async_byte, ti);    /* override */
