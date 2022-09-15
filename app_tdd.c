@@ -732,9 +732,9 @@ static int do_tdd_rx(struct ast_channel *chan, const char *data)
 
 #if SPANDSP_RELEASE_DATE >= 20120902
 	if(ti->international == 1) {
-		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_50, tdd_put_msg, ti, NULL);
+		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_50, V18_AUTOMODING_NONE, tdd_put_msg, ti);
 	} else {
-		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_45, tdd_put_msg, ti, NULL);
+		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_4545, V18_AUTOMODING_NONE, tdd_put_msg, ti);
 	}
 #else
 	if(ti->international == 1) {
