@@ -290,7 +290,11 @@ AST_APP_OPTIONS(starttddrx_opts, {
  *
  * \note This is a spandsp callback function
  */
+#if SPANDSP_RELEASE_DATE < 20120902
+static void spandsp_log(NULL, int level, const char *msg)
+#else
 static void spandsp_log(int level, const char *msg)
+#endif
 {
 	if (level == SPAN_LOG_ERROR) {
 		ast_log(LOG_ERROR, "%s", msg);
@@ -322,7 +326,7 @@ static void set_logging(logging_state_t *state)
 {
 
 #if SPANDSP_RELEASE_DATE >= 20120902
-	span_log_set_message_handler(NULL, state, spandsp_log);
+	span_log_set_message_handler(state, spandsp_log, NULL);
 #else
 	span_log_set_message_handler(state, spandsp_log);
 	span_log_set_error_handler(state, spandsp_error_log);
