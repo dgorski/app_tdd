@@ -332,9 +332,16 @@ static void set_logging(logging_state_t *state)
 }
 
 #if SPANDSP_RELEASE_DATE >= 20120902
+
 /*
   copied from the library as it is no longer visible
  */
+
+/*! The baudot code to shift from alpha to digits and symbols */
+#define BAUDOT_FIGURE_SHIFT     0x1B
+/*! The baudot code to shift from digits and symbols to alpha */
+#define BAUDOT_LETTER_SHIFT     0x1F
+
 static uint8_t v18_decode_baudot(v18_state_t *s, uint8_t ch)
 {
     static const uint8_t conv[2][32] =
