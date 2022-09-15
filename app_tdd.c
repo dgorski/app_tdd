@@ -322,7 +322,7 @@ static void set_logging(logging_state_t *state)
 {
 
 #if SPANDSP_RELEASE_DATE >= 20120902
-	span_log_set_message_handler(state, spandsp_log, NULL);
+	span_log_set_message_handler(NULL, state, spandsp_log);
 #else
 	span_log_set_message_handler(state, spandsp_log);
 	span_log_set_error_handler(state, spandsp_error_log);
