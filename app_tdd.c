@@ -290,7 +290,7 @@ AST_APP_OPTIONS(starttddrx_opts, {
  *
  * \note This is a spandsp callback function
  */
-#if SPANDSP_RELEASE_DATE < 20120902
+#if SPANDSP_RELEASE_DATE >= 20120902
 static void spandsp_log(NULL, int level, const char *msg)
 #else
 static void spandsp_log(int level, const char *msg)
