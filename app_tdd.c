@@ -874,6 +874,8 @@ static int manager_tddrx(struct mansession *s, const struct message *m)
 	}
 
 	result = do_tdd_rx(chan, opts);
+	
+	ast_channel_unref(chan);
 
 	switch (result) {
 	case 0:
