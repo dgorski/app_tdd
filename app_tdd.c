@@ -58,6 +58,9 @@
 					<option name="s">
 						<para>Send spaces as underscores in TddRxMsg events.</para>
 					</option>
+					<option name="m">
+						<para>Replace received audio frames with silence while TDD carrier is active.</para>
+					</option>
 					<option name="i">
 						<para>Use International TTY @ 50 bps instead of US TTY @ 45.45.</para>
 					</option>
@@ -253,8 +256,10 @@ struct tdd_info {
 	ast_mutex_t v18_tx_lock;        /* thread safe tx */
 	unsigned int bufsiz;            /* receive buffer size */
 	char *correlation;              /* a correlation ID for RX messages*/
-	char underscores;		/* send received space chars as underscores */
-	char international;		/* use Int'l 50bps mode instead of US 45.45 */
+
+	uint8_t underscores;		/* send received space chars as underscores */
+	uint8_t international;		/* use Int'l 50bps mode instead of US 45.45 */
+	uint8_t mute_rx;		/* replace incoming frames with silence while carrier is detected */
 
 	/* debug stats */
 	long carrier_trans;             /* how many carrier transitions */
@@ -266,7 +271,8 @@ enum starttddrx_flags {
 	MUXFLAG_BUFSIZE = (1 << 0),
 	MUXFLAG_CORRELATION = (1 << 1),
 	MUXFLAG_UNDERSCORES = (1 << 2),
-	MUXFLAG_NON_US_TTY = (1 << 3), /* selects 50bps, TODO: also translate to ITA_2_STD figs */
+	MUXFLAG_MUTE_RX = (1 << 3),
+	MUXFLAG_NON_US_TTY = (1 << 4), /* selects 50bps, also translate to ITA_2_STD figs */
 };
 
 enum starttddrx_args {
@@ -280,6 +286,7 @@ AST_APP_OPTIONS(starttddrx_opts, {
 	AST_APP_OPTION_ARG('b', MUXFLAG_BUFSIZE, OPT_ARG_BUFSIZE),
 	AST_APP_OPTION_ARG('c', MUXFLAG_CORRELATION, OPT_ARG_CORRELATION),
 	AST_APP_OPTION('s', MUXFLAG_UNDERSCORES),
+	AST_APP_OPTION('m', MUXFLAG_MUTE_RX),
 	AST_APP_OPTION('i', MUXFLAG_NON_US_TTY),
 });
 
@@ -346,18 +353,25 @@ static void set_logging(logging_state_t *state)
 /*! The baudot code to shift from digits and symbols to alpha */
 #define BAUDOT_LETTER_SHIFT     0x1F
 
-static uint8_t v18_decode_baudot(v18_state_t *s, uint8_t ch)
+#endif
+
+/*
+  modified from library to support US-TTY and ITA2 symbol set differences
+*/
+
+static uint8_t tdd_v18_decode_baudot(v18_state_t *s, uint8_t ch, uint8_t intl)
 {
-    static const uint8_t conv[2][32] =
+    static const uint8_t conv[3][32] =
     {
-        {"\bE\nA SIU\rDRJNFCKTZLWHYPQOBG^MXV^"},
-        {"\b3\n- -87\r$4',!:(5\")2=6019?+^./;^"}
+        {"\bE\nA SIU\rDRJNFCKTZLWHYPQOBG^MXV^" },
+        {"\b3\n- -87\r$4',!:(5\")2#6019?+^./;^"}, /* updated to US-TTY, + instead of & */
+        {"\b3\n- '87\r-4-,!:(5+)2#6019?+^./=^" }  /* modified from US-TTY above to ITA-2 */
     };
 
     switch (ch)
     {
     case BAUDOT_FIGURE_SHIFT:
-        s->baudot_rx_shift = 1;
+        s->baudot_rx_shift = 1 + intl;
         break;
     case BAUDOT_LETTER_SHIFT:
         s->baudot_rx_shift = 0;
@@ -368,7 +382,6 @@ static uint8_t v18_decode_baudot(v18_state_t *s, uint8_t ch)
     /* Return 0xFF if we did not produce a character */
     return 0xFF;
 }
-#endif
 
 /*! \brief Callback for spandsp FSK bytes from the V.18 receiver
  *
@@ -416,7 +429,7 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 
 	span_log(&s->logging, SPAN_LOG_FLOW, "Rx byte %x; rs_msg_len=%d\n", byte, s->rx_msg_len);
 
-	if ((octet = v18_decode_baudot(s, byte))) {
+	if ((octet = tdd_v18_decode_baudot(s, byte, ti->international))) {
 		span_log(&s->logging, SPAN_LOG_FLOW, "baudot returned 0x%x (%c)", octet, octet);
 		if (octet == 0x08) {
 			span_log(&s->logging, SPAN_LOG_FLOW, "filtering null/del (0x08)");
@@ -546,8 +559,8 @@ static int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *ch
 		/* pass audio samples from the hook to the modem */
 		for (cur = frame; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
 			v18_rx(&ti->v18_state, cur->data.ptr, cur->samples);
-			if(ti->rx_status == SIG_STATUS_CARRIER_UP) {
-				/* make silent so the callee doesn't hear tones, could/should be optional */
+			if(ti->mute_rx && ti->rx_status == SIG_STATUS_CARRIER_UP) {
+				/* replace with silence so the callee doesn't have to hear tones */
 				ast_frame_clear(cur);
 				ret = 0;
 			}
@@ -662,8 +675,9 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 
 	unsigned int bufsiz = 256;
 	char *correlation = NULL;
-	char underscores = 0;
-	char international = 0;
+	uint8_t underscores = 0;
+	uint8_t international = 0;
+	uint8_t mute_rx = 0;
 
 	AST_DECLARE_APP_ARGS(args,
 		AST_APP_ARG(options);
@@ -702,6 +716,9 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 		if (ast_test_flag(&flags, MUXFLAG_NON_US_TTY)) {
 			international = 1;
 		}
+		if (ast_test_flag(&flags, MUXFLAG_MUTE_RX)) {
+			mute_rx = 1;
+		}
 	}
 
 	ti->bufsiz = bufsiz; /* might be default, might be arg */
@@ -712,6 +729,7 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 	
 	ti->underscores = underscores;
 	ti->international = international;
+	ti->mute_rx = mute_rx;
 }
 
 /*! \brief Enable TDD processing on a channel
