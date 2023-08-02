@@ -342,17 +342,13 @@ static void set_logging(logging_state_t *state)
 	span_log_set_level(state, SPAN_LOG_SHOW_SEVERITY | SPAN_LOG_SHOW_PROTOCOL | SPAN_LOG_DEBUG_3);
 }
 
-#if SPANDSP_RELEASE_DATE >= 20120902
-
-/*
-  copied from the library as it is no longer visible
- */
-
 /*! The baudot code to shift from alpha to digits and symbols */
+#if !defined(BAUDOT_FIGURE_SHIFT)
 #define BAUDOT_FIGURE_SHIFT     0x1B
+#endif
 /*! The baudot code to shift from digits and symbols to alpha */
+#if !defined(BAUDOT_LETTER_SHIFT)
 #define BAUDOT_LETTER_SHIFT     0x1F
-
 #endif
 
 /*
