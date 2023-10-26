@@ -17,11 +17,11 @@ Things that work so far:
 - AMI events are raised when a TDD message is received
 - AMI requests to send TDD on a channel function properly
 - CLI requests to send TDD on a channel function properly
+- Dialplan application to send TDD on a channel
+- TddStop application and manager command to remove existing TDD processing from a channel
 
 Things that still need work:
 
-- add StopTddRx to remove existing TDD processing from a channel
-- dialplan APP to send TDD on a channel added, not completely tested
 - received messages should be encoded as they may contain control sequences (\r \n \0 etc)
   - some of this is implemented (\r and \n), need to test/complete
 - the send AMI and CLI commands should also use some sort of encoding in order to send supported baudot specials
