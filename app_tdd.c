@@ -910,6 +910,9 @@ static int do_tdd_stop(struct ast_channel *chan)
 	struct tdd_info *ti = NULL;
 	int res = -1;
 
+	RAII_VAR(struct stasis_message *, stasis_message, NULL, ao2_cleanup);
+	RAII_VAR(struct ast_json *, stasis_message_blob, NULL, ast_json_unref);
+
 	if (!chan) {
 		return -1;
 	}
