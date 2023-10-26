@@ -925,6 +925,26 @@ static int do_tdd_stop(struct ast_channel *chan)
 		ast_log(LOG_WARNING, "Failed to remove TDD audiohook from channel %s\n", ast_channel_name(chan));
 		goto cleanup;
 	}
+
+	/* if audiohook was removed then TDD processing is stopped, send notifications */
+	if (ast_strlen_zero(ti->correlation)) {
+		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStop", "Channel: %s\r\n", ti->name);
+
+		stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "inactive");
+	} else {
+		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStop", "Channel: %s\r\nCorrelation: %s\r\n", ti->name, ti->correlation);
+
+		stasis_message_blob = ast_json_pack("{s: s, s: s}", "tddstatus", "inactive", "correlation", ti->correlation);
+	}
+
+	stasis_message = ast_channel_blob_create_from_cache(ast_channel_uniqueid(chan), tdd_stop_type(), stasis_message_blob);
+
+	if (stasis_message) {
+		stasis_publish(ast_channel_topic(chan), stasis_message);
+	} else {
+		ast_log(AST_LOG_WARNING, "TddRx not publishing TddStop stasis message for %s (null)\n", ti->name);
+	}
+
 	if (ast_channel_datastore_remove(chan, datastore)) {
 		ast_log(AST_LOG_WARNING, "Failed to remove TDD datastore from channel %s\n", ast_channel_name(chan));
 		goto cleanup;
