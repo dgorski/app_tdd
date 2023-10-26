@@ -217,7 +217,6 @@
 			<synopsis>Raised when TDD processing is removed from a channel.</synopsis>
 		</managerEventInstance>
 	</managerEvent>
-
  ***/
 
 /*! \brief for .to_json
@@ -323,7 +322,7 @@ struct tdd_info {
 	long chars_recv;                /* actual received chars */
 	long chars_sent;                /* sent chars */
 
-	unsigned int transmitting:1; /* Whether we're still transmitting TDD data in the buffer */
+	unsigned int transmitting:1;	/* Whether we're still transmitting TDD data in the buffer */
 };
 
 enum starttddrx_flags {
@@ -337,7 +336,6 @@ enum starttddrx_flags {
 enum starttddrx_args {
 	OPT_ARG_BUFSIZE,
 	OPT_ARG_CORRELATION,
-			      
 	OPT_ARG_ARRAY_SIZE, /* Always the last element of the enum */
 };
 
@@ -423,8 +421,7 @@ static uint8_t tdd_v18_decode_baudot(v18_state_t *s, uint8_t ch, uint8_t intl)
         {"\b3\n- '87\r-4-,!:(5+)2#6019?+^./=^" }  /* modified from US-TTY above to ITA-2 */
     };
 
-    switch (ch)
-    {
+    switch (ch) {
     case BAUDOT_FIGURE_SHIFT:
         s->baudot_rx_shift = 1 + intl;
         break;
@@ -452,12 +449,10 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 	v18_state_t *s = &ti->v18_state;
 	uint8_t octet;
 
-	if (byte < 0)
-	{
+	if (byte < 0) {
 		/* Special conditions */
 		span_log(&s->logging, SPAN_LOG_FLOW, "V.18 signal status is %s (%d)\n", signal_status_to_str(byte), byte);
-		switch (byte)
-		{
+		switch (byte) {
 		case SIG_STATUS_CARRIER_UP:
 			s->consecutive_ones = 0;
 			s->bit_pos = 0;
@@ -466,8 +461,7 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 			break;
 		case SIG_STATUS_CARRIER_DOWN:
 			span_log(&s->logging, SPAN_LOG_FLOW, "V.18 message buffer: %d\n", s->rx_msg_len);
-			if (s->rx_msg_len > 0)
-			{
+			if (s->rx_msg_len > 0) {
 				/* Whatever we have to date constitutes the message */
 				s->rx_msg[s->rx_msg_len] = '\0';
 				span_log(&s->logging, SPAN_LOG_FLOW, "[status] calling put_msg with %d chars", s->rx_msg_len);
@@ -497,8 +491,7 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 		span_log(&s->logging, SPAN_LOG_FLOW, "baudot returned zero");
 	}
 
-	if (s->rx_msg_len >= ti->bufsiz)
-	{
+	if (s->rx_msg_len >= ti->bufsiz) {
 		s->rx_msg[s->rx_msg_len] = '\0';
 		span_log(&s->logging, SPAN_LOG_FLOW, "[bufsiz] calling put_msg with %d chars", s->rx_msg_len);
 		s->put_msg(s->user_data, s->rx_msg, s->rx_msg_len);
@@ -528,8 +521,8 @@ static void destroy_callback(void *data)
 	 * Left here to support a StopTddRx command in the future.
 	 */
 	chan = ast_channel_get_by_name(ti->name);
-	if(chan) {
-		if(ast_strlen_zero(ti->correlation)) {
+	if (chan) {
+		if (ast_strlen_zero(ti->correlation)) {
 			ast_manager_event(chan, EVENT_FLAG_CALL, "TddStop", "Channel: %s\r\n", ti->name);
 
 			stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "inactive");
@@ -567,8 +560,6 @@ static void destroy_callback(void *data)
 	ast_debug(1, "TddRx modem { trans=%ld, sent=%ld, recv=%ld }\n", ti->carrier_trans, ti->chars_sent, ti->chars_recv);
 
 	ast_free(ti);
-
-	return;
 }
 
 /*! \brief datastore information
@@ -610,11 +601,11 @@ static int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *ch
 
 	ti = datastore->data;
 
-	if(direction == AST_AUDIOHOOK_DIRECTION_READ) {
+	if (direction == AST_AUDIOHOOK_DIRECTION_READ) {
 		/* pass audio samples from the hook to the modem */
 		for (cur = frame; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
 			v18_rx(&ti->v18_state, cur->data.ptr, cur->samples);
-			if(ti->mute_rx && ti->rx_status == SIG_STATUS_CARRIER_UP) {
+			if (ti->mute_rx && ti->rx_status == SIG_STATUS_CARRIER_UP) {
 				/* replace with silence so the callee doesn't have to hear tones */
 				ast_frame_clear(cur);
 				ret = 0;
@@ -624,7 +615,7 @@ static int hook_callback(struct ast_audiohook *audiohook, struct ast_channel *ch
 		for (cur = frame; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
 			/* overwrite frame samples with modem samples, if any */
 			ast_mutex_lock(&ti->v18_tx_lock);
-			if(v18_tx(&ti->v18_state, cur->data.ptr, cur->samples) > 0) {
+			if (v18_tx(&ti->v18_state, cur->data.ptr, cur->samples) > 0) {
 				ret = 0; /* changed at least one sample */
 				ti->transmitting = 1;
 			} else {
@@ -659,20 +650,20 @@ static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 	ti->chars_recv += len;
 
 	chan = ast_channel_get_by_name(ti->name);
-	if(!chan) {
+	if (!chan) {
 		ast_log(AST_LOG_WARNING, "TddRx No channel matching '%s' found.\n", ti->name);
 		return;
 	}
 
 	/* escape \r and \n for manager, optionally replace space with underscore */
-	for(i=0, o=0; i < len; i++) {
-		if(msg[i] == '\n') {
+	for (i = 0, o = 0; i < len; i++) {
+		if (msg[i] == '\n') {
 			buf[o++] = '\\';
 			buf[o++] = 'n';
-		} else if(msg[i] == '\r') {
+		} else if (msg[i] == '\r') {
 			buf[o++] = '\\';
 			buf[o++] = 'r';
-		} else if(msg[i] == ' ' && ti->underscores == 1) {
+		} else if (msg[i] == ' ' && ti->underscores == 1) {
 			buf[o++] = '_';
 		} else {
 			buf[o++] = msg[i];
@@ -680,7 +671,7 @@ static void tdd_put_msg(void *user_data, const uint8_t *msg, int len)
 	}
 	buf[o] = '\0';
 
-	if(ast_strlen_zero(ti->correlation)) {
+	if (ast_strlen_zero(ti->correlation)) {
 		ast_manager_event(chan, EVENT_FLAG_CALL, "TddRxMsg",
 			"Channel: %s\r\nMessage: %s\r\n", ti->name, buf);
 		stasis_message_blob = ast_json_pack("{s: s}", "message", msg);
@@ -755,7 +746,7 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 				if (sscanf(opts[OPT_ARG_BUFSIZE], "%u", &bufsiz) != 1 ) {
 					ast_log(LOG_WARNING, "Ignoring buffer size option: could not parse numeric value.\n");
 				} else {
-					if(bufsiz < 1 || bufsiz > 256) {
+					if (bufsiz < 1 || bufsiz > 256) {
 						ast_log(LOG_WARNING, "Ignoring buffer size option: value out of range (1-256).\n");
 						bufsiz = 256;
 					}
@@ -782,7 +773,7 @@ static void starttddrx_process_args(struct tdd_info *ti, const char *data)
 
 	ti->bufsiz = bufsiz; /* might be default, might be arg */
 
-	if(!ast_strlen_zero(correlation)) {
+	if (!ast_strlen_zero(correlation)) {
 		ti->correlation = ast_strdup(correlation);
 	}
 	
@@ -843,13 +834,13 @@ static int do_tdd_rx(struct ast_channel *chan, const char *data)
 	ti->rx_status = SIG_STATUS_CARRIER_DOWN; /* init status field with a sane value */
 
 #if SPANDSP_RELEASE_DATE >= 20120902
-	if(ti->international == 1) {
+	if (ti->international == 1) {
 		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_50, V18_AUTOMODING_NONE, tdd_put_msg, ti);
 	} else {
 		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_4545, V18_AUTOMODING_NONE, tdd_put_msg, ti);
 	}
 #else
-	if(ti->international == 1) {
+	if (ti->international == 1) {
 		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_50, tdd_put_msg, ti);
 	} else {
 		v18_init(&ti->v18_state, 0, V18_MODE_5BIT_45, tdd_put_msg, ti);
@@ -882,7 +873,7 @@ static int do_tdd_rx(struct ast_channel *chan, const char *data)
 	ast_channel_unlock(chan);
 	ast_audiohook_attach(chan, &ti->audiohook);
 
-	if(ast_strlen_zero(ti->correlation)) {
+	if (ast_strlen_zero(ti->correlation)) {
 		ast_manager_event(chan, EVENT_FLAG_CALL, "TddStart", "Channel: %s\r\n", ti->name);
 
 		stasis_message_blob = ast_json_pack("{s: s}", "tddstatus", "active");
@@ -1124,16 +1115,18 @@ static int manager_tddstop(struct mansession *s, const struct message *m)
 static void tdd_send_message(struct tdd_info *ti, const char *message)
 {
 	char buf[256];
+	size_t msglen;
 	int i, o;
 
-	if(strlen(message) > 255) {
-		ast_log(AST_LOG_WARNING, "TddTx: length exceeds 255, message will be truncated.");
+	msglen = strlen(message);
+	if (msglen > sizeof(buf) - 1) {
+		ast_log(AST_LOG_WARNING, "TddTx: length exceeds %lu, message will be truncated.", sizeof(buf) - 1);
 	}
 
 	/* decode escapes */
-	for(i=0,o=0; i < 256; i++) {
-		if(i < (strlen(message) -1) && message[i] == '\\') {
-			switch(message[i + 1]) {
+	for (i = 0, o = 0; i < 256; i++) {
+		if (i < (msglen -1) && message[i] == '\\') {
+			switch (message[i + 1]) {
 			case '0': /* NUL */
 				i++;
 				buf[o++] = '\0';
@@ -1191,9 +1184,9 @@ static int tdd_tx_exec(struct ast_channel *chan, const char *data)
 
 	ast_channel_lock(chan);
 
-	/* TODO: tx really only works when audiohook is getting write frames (like from a bridge) */
+	/*! \todo tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
-	if(ast_channel_is_bridged(chan) == 0) {
+	if (ast_channel_is_bridged(chan) == 0) {
 		ast_channel_unlock(chan);
 		ast_log(LOG_ERROR, "Channel is not bridged\n");
 		return -1;
@@ -1242,9 +1235,9 @@ static int manager_tddtx(struct mansession *s, const struct message *m)
 
 	ast_channel_lock(c);
 
-	/* TODO: tx really only works when audiohook is getting write frames (like from a bridge) */
+	/*! \todo tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
-	if(ast_channel_is_bridged(c) == 0) {
+	if (ast_channel_is_bridged(c) == 0) {
 		ast_channel_unlock(c);
 		ast_channel_unref(c);
 		astman_send_error(s, m, "Channel is not bridged");
@@ -1309,7 +1302,7 @@ static char *handle_cli_tdd(struct ast_cli_entry *e, int cmd, struct ast_cli_arg
 			ast_cli(a->fd, "Must provide a message for 'send'.\n");
 			return CLI_SHOWUSAGE;
 		}
-		if(ast_strlen_zero(a->argv[3])) {
+		if (ast_strlen_zero(a->argv[3])) {
 			ast_cli(a->fd, "Must provide a message for 'send'.\n");
 			return CLI_SHOWUSAGE;
 		}
@@ -1319,15 +1312,15 @@ static char *handle_cli_tdd(struct ast_cli_entry *e, int cmd, struct ast_cli_arg
 	}
 
 	chan =  ast_channel_get_by_name(a->argv[2]);
-	if(!chan) {
+	if (!chan) {
 		ast_cli(a->fd, "No channel matching '%s' found.\n", a->argv[2]);
 		return CLI_SUCCESS;
 	}
 
 	ast_channel_lock(chan);
-	/* TODO: tx really only works when audiohook is getting write frames (like from a bridge) */
+	/*! \todo tx really only works when audiohook is getting write frames (like from a bridge) */
 /*
-	if(ast_channel_is_bridged(chan) == 0) {
+	if (ast_channel_is_bridged(chan) == 0) {
 		ast_channel_unlock(chan);
 		ast_channel_unref(chan);
 		ast_cli(a->fd, "Channel is not bridged");
