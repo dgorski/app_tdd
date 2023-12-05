@@ -484,6 +484,8 @@ static void my_v18_tdd_put_async_byte(void *user_data, int byte)
 			span_log(&s->logging, SPAN_LOG_FLOW, "filtering null/del (0x08)");
 		} else if (octet == 0x0d) {
 			span_log(&s->logging, SPAN_LOG_FLOW, "filtering CR (0x0d)");
+		} else if (octet == 0xff) {
+			span_log(&s->logging, SPAN_LOG_FLOW, "filtering FF (0xff)"); /* FIG/LTR SHIFT */
 		} else {
 			s->rx_msg[s->rx_msg_len++] = octet;
 		}
